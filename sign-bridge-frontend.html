@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Bridge - Sign Language Translator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .video-container {
+            margin: 20px auto;
+            max-width: 640px;
+            position: relative;
+        }
+
+        #videoElement {
+            width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .prediction-box {
+            margin: 20px auto;
+            padding: 20px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-width: 400px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+
+        #prediction {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2196F3;
+        }
+
+        .status {
+            margin-top: 10px;
+            color: #666;
+        }
+
+        .controls {
+            margin: 20px 0;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 0 10px;
+            border: none;
+            border-radius: 5px;
+            background-color: #2196F3;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #1976D2;
+        }
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Sign Bridge</h1>
+        <div class="video-container">
+            <video id="videoElement" autoplay playsinline></video>
+        </div>
+        <div class="controls">
+            <button id="startButton">Start Translation</button>
+            <button id="stopButton" disabled>Stop Translation</button>
+        </div>
+        <div class="prediction-box">
+            <h2>Prediction</h2>
+            <div id="prediction">-</div>
+            <div class="status" id="status">Not connected</div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let video;
+        let isStreaming = false;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            video = document.getElementById('videoElement');
+            const startButton = document.getElementById('startButton');
+            const stopButton = document.getElementById('stopButton');
+            const status = document.getElementById('status');
+            
+            startButton.addEventListener('click', startStreaming);
+            stopButton.addEventListener('click', stopStreaming);
+            
+            async function startStreaming() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    video.srcObject = stream;
+                    
+                    // Connect to WebSocket
+                    ws = new WebSocket('ws://localhost:8000/ws');
+                    
+                    ws.onopen = () => {
+                        isStreaming = true;
+                        startButton.disabled = true;
+                        stopButton.disabled = false;
+                        status.textContent = 'Connected';
+                        sendFrames();
+                    };
+                    
+                    ws.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        document.getElementById('prediction').textContent = data.prediction;
+                        
+                        // Play audio
+                        if (data.audio) {
+                            const audio = new Audio('data:audio/mp3;base64,' + data.audio);
+                            audio.play();
+                        }
+                    };
+                    
+                    ws.onclose = () => {
+                        isStreaming = false;
+                        startButton.disabled = false;
+                        stopButton.disabled = true;
+                        status.textContent = 'Disconnected';
+                    };
+                    
+                } catch (err) {
+                    console.error('Error:', err);
+                    status.textContent = 'Error: ' + err.message;
+                }
+            }
+            
+            function stopStreaming() {
+                if (ws) {
+                    ws.close();
+                }
+                if (video.srcObject) {
+                    video.srcObject.getTracks().forEach(track => track.stop());
+                }
+                video.srcObject = null;
+                isStreaming = false;
+                startButton.disabled = false;
+                stopButton.disabled = true;
+                status.textContent = 'Stopped';
+            }
+            
+            async function sendFrames() {
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                
+                while (isStreaming) {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    context.drawImage(video, 0, 0);
+                    const frame = canvas.toDataURL('image/jpeg');
+                    
+                    if (ws.readyState === WebSocket.OPEN) {
+                        ws.send(frame);
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, 1000 / 30)); // 30 FPS
+                }
+            }
+        });
+    </script>
+</body>
+</html>
